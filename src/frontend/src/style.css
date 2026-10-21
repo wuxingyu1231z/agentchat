@@ -1,0 +1,30 @@
+:root {
+  --ac-font: "Microsoft YaHei UI", "PingFang SC", "Microsoft YaHei", "Noto Sans SC", Arial, sans-serif;
+  --ac-nav-font: "SimHei", "Heiti SC", "Microsoft YaHei", sans-serif;
+  --ac-brand: #1b7ce4;
+  --ac-text: #263445;
+  --ac-muted: #64748b;
+  --ac-border: #e2e8f0;
+  --ac-radius: 12px;
+  --ac-shadow: 0 3px 14px rgb(15 23 42 / 4%);
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body, #app { min-height: 100%; }
+body { font-family: var(--ac-font); font-size: 14px; line-height: 1.65; color: var(--ac-text); -webkit-font-smoothing: antialiased; }
+button, input, textarea, select { font-family: inherit; }
+button, a, input, textarea, select, [tabindex] { outline-offset: 3px; }
+:focus-visible { outline: 2px solid #93c5fd; }
+button:disabled { cursor: not-allowed; }
+.md-editor { background-color: transparent !important; }
+.md-editor-preview-wrapper { padding: 0 !important; }
+/* Keep Element Plus's overlay, loading and teleport layers operational. */
+.el-message-box { width: min(420px, calc(100vw - 32px)); max-width: calc(100vw - 32px); border-radius: var(--ac-radius); }
+.delete-confirm-dialog .el-message-box { box-shadow: 0 18px 48px rgb(15 23 42 / 14%); }
+.delete-confirm-dialog .el-message-box__header { padding: 22px 24px 10px; }
+.delete-confirm-dialog .el-message-box__content { padding: 12px 24px 20px; }
+.delete-confirm-dialog .el-message-box__btns { padding: 0 24px 22px; }
+.delete-confirm-dialog .el-message-box__btns .el-button { min-width: 84px; border-radius: 8px; }
+.delete-confirm-dialog .el-message-box__btns .el-button--primary { --el-button-bg-color: #f56c6c; --el-button-border-color: #f56c6c; --el-button-hover-bg-color: #f78989; --el-button-hover-border-color: #f78989; }
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; scroll-behavior: auto !important; }
+}
