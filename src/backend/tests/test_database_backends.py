@@ -113,7 +113,8 @@ def test_real_schema_json_timestamps_commit_and_rollback(tmp_path):
     engine, async_engine = create_database_engines(urls)
     try:
         SQLModel.metadata.create_all(engine)
-        assert len(inspect(engine).get_table_names()) == len(SQLModel.metadata.tables) == 22
+        assert set(inspect(engine).get_table_names()) == set(SQLModel.metadata.tables)
+        assert {"agent_run", "agent_run_event", "agent_run_tool_call", "retired_agent", "tool_preference"} <= set(SQLModel.metadata.tables)
         with engine.connect() as connection:
             assert connection.execute(text("PRAGMA foreign_keys")).scalar_one() == 1
             assert connection.execute(text("PRAGMA journal_mode")).scalar_one() == "wal"

@@ -55,13 +55,10 @@ class HistoryDao:
         async with async_session_getter() as session:
             statement = select(HistoryTable).where(
                 HistoryTable.conversation_id == conversation_id
-            ).order_by(HistoryTable.create_time.desc())
+            ).order_by(HistoryTable.create_time.desc(), HistoryTable.id.desc()).limit(k)
             result = await session.exec(statement)
             messages = result.all()
 
-            # 每次最多取当前会话的k条历史记录
-            if len(messages) > k:
-                messages = messages[:k]
             # 保持消息的时间顺序（从旧到新）
             messages.reverse()
 

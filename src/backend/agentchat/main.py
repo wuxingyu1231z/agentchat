@@ -80,10 +80,13 @@ async def lifespan(app: FastAPI):
     await register_router(app)
     from agentchat.api.services.conversation import ConversationService
     from agentchat.services.mcp.metadata import stop_metadata_tasks
+    from agentchat.services.agent_runs import RunService
+    await RunService.initialize()
     print_logo()
 
     yield
 
+    await RunService.shutdown()
     await stop_metadata_tasks()
     await ConversationService.stop_conversation_title_tasks()
     if redis_client is not None:

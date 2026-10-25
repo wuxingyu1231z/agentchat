@@ -17,11 +17,18 @@ node_modules/
 # Local backend credentials; the checked-in config.yaml remains a template.
 src/backend/agentchat/config.local*.yaml
 src/backend/data/uploads/
+src/backend/data/sandbox/
 .venv*/
 *.db
 *.db-shm
 *.db-wal
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
 .runtime/
 src/backend/logs/
 src/frontend/public/ui-detail-review/
 docs/design-preview/
+
+# Private study notes and evaluation outputs; keep these off GitHub.
+/.local-study/

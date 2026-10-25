@@ -24,7 +24,7 @@ const tone = computed(() => ({weather:'orange',search:'cyan',code:'purple',chart
     <div class="card-heading">
       <AgentIdentity :agent="agent" variant="catalog"/>
       <div class="card-copy"><h3 :title="agent.name">{{ agent.name }}</h3><p class="card-description" :title="agent.description">{{ agent.description || '为你的工作提供帮助，开始对话试试。' }}</p><span class="category-tag">{{ category }}</span></div>
-      <el-dropdown trigger="click" class="card-menu">
+      <el-dropdown v-if="!agent.is_builtin" trigger="click" class="card-menu">
         <button class="icon-button" :aria-label="`${agent.name}的更多操作`"><UiIcon name="more"/></button>
         <template #dropdown><el-dropdown-menu><el-dropdown-item @click="$emit('edit')"><UiIcon name="edit"/><span>编辑智能体</span></el-dropdown-item><el-dropdown-item @click="$emit('remove')" class="dropdown-danger-action"><UiIcon name="trash"/><span>删除智能体</span></el-dropdown-item></el-dropdown-menu></template>
       </el-dropdown>
@@ -40,7 +40,7 @@ const tone = computed(() => ({weather:'orange',search:'cyan',code:'purple',chart
     </div>
     <div class="card-footer">
       <button class="chat-button" :disabled="disabled" @click="$emit('chat')"><UiIcon name="chat"/><span>{{ starting ? '创建中…' : '开始对话' }}</span></button>
-      <button class="edit-button" :aria-label="`编辑${agent.name}`" title="编辑智能体" @click="$emit('edit')"><UiIcon name="edit"/></button>
+      <button v-if="!agent.is_builtin" class="edit-button" :aria-label="`编辑${agent.name}`" title="编辑智能体" @click="$emit('edit')"><UiIcon name="edit"/></button>
     </div>
   </article>
 </template>

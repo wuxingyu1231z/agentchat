@@ -243,9 +243,7 @@ class ConversationUsageTests(unittest.IsolatedAsyncioTestCase):
             ConversationService=SimpleNamespace(
                 get_list_conversation=AsyncMock(return_value=conversations),
                 conversation_title_pending=lambda value: False,
-            ),
-            AgentService=SimpleNamespace(
-                select_agent_by_id=AsyncMock(
+                get_agent_config=AsyncMock(
                     return_value={
                         "name": "当前智能体",
                     }

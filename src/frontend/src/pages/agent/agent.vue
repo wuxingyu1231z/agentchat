@@ -126,7 +126,7 @@ onMounted(async () => {
       <div class="cards" :class="{ 'list-mode': displayMode === 'list' }" v-loading="loading" :aria-busy="loading">
         <button v-if="assistantView" class="new-card" @click="createAgent"><span class="plus-circle"><svg class="icon" aria-hidden="true"><use href="#plus"/></svg></span><strong>新建助手</strong><p>基于你的需求，快速创建专属 AI 助手，提升工作效率</p></button>
         <AgentCatalogCard v-for="agent in displayedAgents" :key="agent.agent_id" :agent="agent"
-          :model-name="models[agent.llm_id] || (agent.llm_id ? '模型未加载' : '模型未配置')"
+          :model-name="models[agent.llm_id] || (agent.llm_id ? '模型未加载' : agent.is_builtin ? (agent.default_model_name ? `默认模型 · ${agent.default_model_name}` : '默认模型') : '模型未配置')"
           :model="modelDetails[agent.llm_id]" :resources="resourceCounts(agent)"
           :starting="startingAgent === agent.agent_id" :disabled="!!startingAgent"
           @chat="startChat(agent)" @edit="editAgent(agent)" @remove="removeAgent(agent)" />

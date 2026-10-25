@@ -33,6 +33,7 @@ from agentchat.database.dao.history import HistoryDao
 from agentchat.database.models.agent import AgentTable
 from agentchat.database.models.conversation import ConversationTable
 from agentchat.schemas.completion import CompletionReq
+from agentchat.schemas.conversation import ConversationCreateRequest
 from agentchat.utils.chat_attachments import attachment_events
 from agentchat.utils.contexts import (
     set_agent_name_context,
@@ -40,6 +41,7 @@ from agentchat.utils.contexts import (
     set_user_id_context,
 )
 from agentchat.utils.conversation_title import normalize_conversation_title
+from agentchat.utils.default_agent import DEFAULT_AGENT_ID
 from langchain_core.outputs import ChatGeneration, LLMResult
 
 ROOT = Path(__file__).resolve().parents[1] / "agentchat"
@@ -74,6 +76,8 @@ class FlexibleConversationTests(unittest.IsolatedAsyncioTestCase):
                 yield session
 
         self.patches = [patch("agentchat.database.dao.agent.session_getter", sync_session),
+                        patch("agentchat.database.dao.tool.async_session_getter", async_session),
+                        patch("agentchat.database.dao.tool.session_getter", sync_session),
                         patch("agentchat.database.dao.conversation.async_session_getter", async_session),
                         patch("agentchat.database.dao.history.async_session_getter", async_session),
                         patch("agentchat.database.dao.usage_stats.async_session_getter", async_session),
@@ -112,6 +116,41 @@ class FlexibleConversationTests(unittest.IsolatedAsyncioTestCase):
     async def save(self, role, content, events=None):
         return await HistoryDao.create_history(role, content, events or [], self.conversation.conversation_id)
 
+    async def test_create_and_resolve_without_selecting_a_database_agent(self):
+        request = ConversationCreateRequest()
+        with patch.object(AgentService, "_check_permission", side_effect=AssertionError("通用助手不依赖数据库智能体")):
+            conversation = await ConversationService.create_conversation(
+                request.name, request.agent_id, request.agent_type, "new-user"
+            )
+            config = await ConversationService.resolve_agent(conversation["conversation_id"], "new-user")
+        self.assertEqual(conversation["agent_id"], DEFAULT_AGENT_ID)
+        self.assertEqual(config["user_id"], "new-user")
+        self.assertEqual(config["llm_id"], "")
+        self.assertFalse(config["enable_memory"])
+        for field in ("tool_ids", "mcp_ids", "knowledge_ids", "agent_skill_ids"):
+            self.assertEqual(config[field], [])
+        self.assertIsNone(await AgentDao.select_agent_by_id(DEFAULT_AGENT_ID))
+        self.assertEqual(await AgentService.get_all_agent_by_user_id("new-user"), [])
+        reloaded = await ConversationService.get_agent_by_conversation_id(conversation["conversation_id"])
+        self.assertEqual(reloaded["id"], DEFAULT_AGENT_ID)
+        with self.assertRaises(ValueError):
+            await ConversationService.resolve_agent(conversation["conversation_id"], "other", DEFAULT_AGENT_ID)
+
+    async def test_switch_to_general_and_back_keeps_the_same_conversation(self):
+        await self.save("user", "帮我整理工作计划")
+        await self.save("assistant", "原回复")
+        before = await ConversationDao.select_conversation_by_id(self.conversation.conversation_id)
+        general = await ConversationService.switch_agent(self.conversation.conversation_id, DEFAULT_AGENT_ID, "user")
+        self.assertEqual(general["agent_id"], DEFAULT_AGENT_ID)
+        self.assertEqual(general["name"], before.name)
+        self.assertEqual(general["create_time"], before.create_time.isoformat())
+        config = await ConversationService.resolve_agent(self.conversation.conversation_id, "user")
+        self.assertEqual(config["name"], "通用助手")
+        await ConversationService.switch_agent(self.conversation.conversation_id, "agent-b", "user")
+        histories = await HistoryDao.get_conversation_history(self.conversation.conversation_id)
+        self.assertEqual([row.content for row in histories], ["帮我整理工作计划", "原回复"])
+        self.assertEqual(histories[-1].events[0]["data"]["agent_id"], "agent-a")
+
     async def test_switch_keeps_conversation_title_history_and_original_reply_identity(self):
         await self.save("user", "帮我整理工作计划")
         await self.save("assistant", "原回复")
@@ -142,7 +181,7 @@ class FlexibleConversationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(sum(result["first_user"] for result in results), 1)
 
     async def test_permissions_checked_before_switching(self):
-        for user, agent_id in [("other", "agent-b"), ("user", "private"), ("user", "missing")]:
+        for user, agent_id in [("other", "agent-b"), ("other", DEFAULT_AGENT_ID), ("user", "private"), ("user", "missing")]:
             with self.assertRaises(ValueError):
                 await ConversationService.resolve_agent(self.conversation.conversation_id, user, agent_id)
         self.assertEqual((await ConversationDao.select_conversation_by_id(self.conversation.conversation_id)).agent_id, "agent-a")
@@ -156,6 +195,8 @@ class FlexibleConversationTests(unittest.IsolatedAsyncioTestCase):
         conversation = await ConversationDao.select_conversation_by_id(self.conversation.conversation_id)
         self.assertEqual(conversation.agent_id, "")
         self.assertEqual(len(await HistoryDao.get_conversation_history(conversation.conversation_id)), 2)
+        config = await ConversationService.resolve_agent(conversation.conversation_id, "user")
+        self.assertEqual(config["id"], DEFAULT_AGENT_ID)
         result = await ConversationService.resolve_agent(self.conversation.conversation_id, "user", "agent-b")
         self.assertEqual(result["id"], "agent-b")
 
@@ -191,6 +232,74 @@ class FlexibleConversationTests(unittest.IsolatedAsyncioTestCase):
         await ConversationDao.update_title_if_unchanged(self.conversation.conversation_id, first["title"], "人工标题")
         await ConversationDao.update_title_if_unchanged(self.conversation.conversation_id, first["title"], "迟到的标题")
         self.assertEqual((await ConversationDao.select_conversation_by_id(self.conversation.conversation_id)).name, "人工标题")
+
+    def completion_with_agent(self, agent_class):
+        from agentchat.protocols.ag_ui import protocol_stream
+        from fastapi import Request
+        ns = dict(
+            Request=Request,
+            BackgroundTask=BackgroundTask,
+            protocol_stream=protocol_stream,
+            CompletionReq=CompletionReq,
+            UserPayload=SimpleNamespace,
+            Depends=Depends,
+            get_login_user=lambda: None,
+            HTTPException=HTTPException,
+            ConversationService=ConversationService,
+            HistoryService=self.history,
+            AgentConfig=lambda **data: SimpleNamespace(**data),
+            GeneralAgent=agent_class,
+            set_user_id_context=set_user_id_context,
+            set_agent_name_context=set_agent_name_context,
+            set_conversation_id_context=set_conversation_id_context,
+            bind_log_context=lambda **fields: None,
+            build_completion_user_input=lambda file_url, user_input: user_input,
+            build_completion_system_prompt=lambda system, summary, memory: system,
+            SYSTEM_PROMPT="通用提示词",
+            List=List,
+            BaseMessage=BaseMessage,
+            SystemMessage=SystemMessage,
+            HumanMessage=HumanMessage,
+            json=json,
+            attachment_events=attachment_events,
+            count_tokens_usage=lambda value: 1,
+            WatchedStreamingResponse=WatchedStreamingResponse,
+        )
+        return load_definition(ROOT / "api/v1/completion.py", "completion", ns)
+
+    async def test_first_message_streams_with_general_agent_without_selection(self):
+        request = ConversationCreateRequest()
+        conversation = await ConversationService.create_conversation(
+            request.name, request.agent_id, request.agent_type, "user"
+        )
+        configs = []
+
+        class FakeAgent:
+            def __init__(self, config):
+                configs.append(config)
+            async def init_agent(self):
+                pass
+            def stop_streaming_callback(self):
+                pass
+            async def astream(self, messages):
+                yield {"type": "response_chunk", "data": {"chunk": "general reply"}}
+
+        completion = self.completion_with_agent(FakeAgent)
+        with patch.object(ConversationService, "queue_conversation_title"):
+            response = await completion(
+                req=CompletionReq(conversation_id=conversation["conversation_id"], user_input="hello"),
+                login_user=SimpleNamespace(user_id="user"),
+            )
+        frames = [frame async for frame in response.body_iterator]
+        self.assertIn('"agent_id": "general"', frames[0])
+        self.assertTrue(any("general reply" in frame for frame in frames))
+        self.assertEqual(configs[0].llm_id, "")
+        self.assertEqual(configs[0].user_id, "user")
+        history = await HistoryDao.get_conversation_history(conversation["conversation_id"])
+        self.assertEqual([row.role for row in history], ["user", "assistant"])
+        self.assertEqual(history[-1].events[0]["data"]["agent_id"], DEFAULT_AGENT_ID)
+        reloaded = await self.history.get_conversation_history(conversation["conversation_id"])
+        self.assertEqual(reloaded[-1]["events"][0]["data"]["agent_id"], DEFAULT_AGENT_ID)
 
     async def test_two_agents_reply_in_one_conversation_and_stream_identity_is_fixed(self):
         configs, inputs, queued = [], [], []
@@ -233,38 +342,7 @@ class FlexibleConversationTests(unittest.IsolatedAsyncioTestCase):
                     )
                 )
 
-        from agentchat.protocols.ag_ui import protocol_stream
-        from fastapi import Request
-        ns = dict(
-            Request=Request,
-            BackgroundTask=BackgroundTask,
-            protocol_stream=protocol_stream,
-            CompletionReq=CompletionReq,
-            UserPayload=SimpleNamespace,
-            Depends=Depends,
-            get_login_user=lambda: None,
-            HTTPException=HTTPException,
-            ConversationService=ConversationService,
-            HistoryService=self.history,
-            AgentConfig=lambda **data: SimpleNamespace(**data),
-            GeneralAgent=FakeAgent,
-            set_user_id_context=set_user_id_context,
-            set_agent_name_context=set_agent_name_context,
-            set_conversation_id_context=set_conversation_id_context,
-            bind_log_context=lambda **fields: None,
-            build_completion_user_input=lambda file_url, user_input: user_input,
-            build_completion_system_prompt=lambda system, summary, memory: system,
-            SYSTEM_PROMPT="通用提示词",
-            List=List,
-            BaseMessage=BaseMessage,
-            SystemMessage=SystemMessage,
-            HumanMessage=HumanMessage,
-            json=json,
-            attachment_events=attachment_events,
-            count_tokens_usage=lambda value: 1,
-            WatchedStreamingResponse=WatchedStreamingResponse,
-        )
-        completion = load_definition(ROOT / "api/v1/completion.py", "completion", ns)
+        completion = self.completion_with_agent(FakeAgent)
         with patch.object(ConversationService, "queue_conversation_title", side_effect=lambda *args: queued.append(args)):
             response = await completion(req=CompletionReq(conversation_id=self.conversation.conversation_id, agent_id="agent-a", user_input="首个问题"), login_user=SimpleNamespace(user_id="user"))
         # 在第一轮流结束前切换下一轮智能体，本轮身份仍固定为原智能体。

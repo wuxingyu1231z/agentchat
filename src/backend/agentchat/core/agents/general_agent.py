@@ -33,9 +33,6 @@ from agentchat.core.agents.skill_agent import SkillAgent
 from agentchat.core.callbacks import usage_metadata_callback
 from agentchat.core.models.manager import ModelManager
 from agentchat.database import AgentSkill
-from agentchat.services.rag.handler import RagHandler
-from agentchat.tools import AgentToolsWithName
-from agentchat.tools.openapi_tool.adapter import OpenAPIToolAdapter
 from agentchat.utils.logging import log_event, tool_operation
 
 
@@ -62,10 +59,18 @@ class AgentConfig(BaseModel):
 
 
 class EmitEventAgentMiddleware(AgentMiddleware):
-    def __init__(self, name_resolver_func):
+    def __init__(self, name_resolver_func, run_context=None):
         super().__init__()
 
         self.name_resolver_func = name_resolver_func
+        self.run_context = run_context
+        self.argument_failures = {}
+
+    async def abefore_model(self, state, runtime):
+        if self.run_context:
+            await self.run_context.boundary()
+            if state.get("model_call_count", 0) >= 12:
+                raise ValueError("已达到任务执行轮数上限，请结束任务后缩小问题范围")
 
     async def aafter_model(
         self, state: StreamAgentState, runtime: Runtime
@@ -73,7 +78,7 @@ class EmitEventAgentMiddleware(AgentMiddleware):
         last_message = state["messages"][-1]
         if last_message.tool_calls:
             return {
-                "model_call_count": state["model_call_count"] + 1,
+                "model_call_count": state.get("model_call_count", 0) + 1,
             }
 
         return {
@@ -88,11 +93,27 @@ class EmitEventAgentMiddleware(AgentMiddleware):
         try:
             if available_tools := request.state.get("available_tools", []):
                 request.tools = available_tools
-            response = await handler(request)
+            if self.run_context:
+                from agentchat.services.context import overflow
+                manager = self.run_context.get_context(request.model)
+                projected = await manager.model_request(request)
+                try:
+                    async with asyncio.timeout(120):
+                        response = await handler(projected)
+                except Exception as error:
+                    if not overflow(error):
+                        raise
+                    projected = await manager.model_request(request, emergency=True)
+                    async with asyncio.timeout(120):
+                        response = await handler(projected)
+            else:
+                response = await handler(request)
             return response
         except Exception as err:
             log_event("model", "模型调用失败", level="ERROR", error_type=type(err).__name__,
                       upstream_status=getattr(err, "status_code", None))
+            if self.run_context:
+                raise
             raise ValueError(err)
 
     async def awrap_tool_call(
@@ -101,6 +122,21 @@ class EmitEventAgentMiddleware(AgentMiddleware):
         handler: Callable[[ToolCallRequest], ToolMessage | Command],
     ) -> ToolMessage | Command:
         writer = get_stream_writer()
+        if self.run_context:
+            _, display_name = self.name_resolver_func(request.tool_call["name"])
+            return await self.run_context.execute_tool(request, handler, writer, display_name)
+        from agentchat.services.tool_arguments import prepare_tool_request, argument_error, MAX_ARGUMENT_FAILURES
+        original = request.tool_call
+        request, corrections, errors = prepare_tool_request(request)
+        exhausted = self.argument_failures.get(original["name"], 0) >= MAX_ARGUMENT_FAILURES
+        if errors or exhausted:
+            self.argument_failures[original["name"]] = self.argument_failures.get(original["name"], 0) + bool(errors)
+            result = argument_error(original, errors, exhausted=exhausted or self.argument_failures[original["name"]] >= MAX_ARGUMENT_FAILURES)
+            writer({"tool_call_id": original["id"], "title": f"校验工具参数: {original['name']}", "status": "ERROR", "message": result.content})
+            return result
+        if corrections:
+            writer({"tool_call_id": original["id"] + ":arguments", "title": f"修正工具参数: {original['name']}", "status": "END",
+                    "message": "已按工具 schema 规范参数：" + "、".join(corrections)})
         tool_call_count = request.state.get("tool_call_count", 0)
         # 发送工具分析开始事件
         tool_type, display_tool_name = self.name_resolver_func(request.tool_call["name"])
@@ -143,11 +179,13 @@ class EmitEventAgentMiddleware(AgentMiddleware):
                     "message": str(err),
                 }
             )
-            return ToolMessage(content=str(err), name=request.tool_call["name"], tool_call_id=request.tool_call["id"])
+            return ToolMessage(content=str(err), name=request.tool_call["name"], tool_call_id=request.tool_call["id"], status="error")
 
 class GeneralAgent:
-    def __init__(self, agent_config: AgentConfig):
+    def __init__(self, agent_config: AgentConfig, *, checkpointer=None, run_context=None):
         self.agent_config = agent_config
+        self.checkpointer = checkpointer
+        self.run_context = run_context
 
         self.chat_model = None
         self.tool_invocation_model = None
@@ -182,6 +220,14 @@ class GeneralAgent:
         await self.setup_knowledge_tool()
         await self.setup_language_model()
 
+        if self.run_context:
+            manager = self.run_context.get_context(self.chat_model)
+            self.tools.extend(manager.tools())
+            self.tools.extend(self.run_context.get_sandbox().tools())
+            for item in self.run_context.get_sandbox().tools():
+                self.tool_metadata_map[item.name] = {"name": "沙箱文档", "type": "工具"}
+            self.run_context.read_only_tools.update({"search_context", "read_evidence"})
+
         self.search_tool = self.setup_search_tool()
         self.middlewares = await self.setup_agent_middleware()
         self.react_agent = self.setup_react_agent()
@@ -193,8 +239,12 @@ class GeneralAgent:
             max_tools=3 # 限制每次选择最多 3个工具
         )
 
-        emit_event_middleware = EmitEventAgentMiddleware(self.get_tool_display_name)
+        emit_event_middleware = EmitEventAgentMiddleware(self.get_tool_display_name, self.run_context)
 
+        if self.run_context:
+            from langchain.agents.middleware import ModelRetryMiddleware
+            from agentchat.services.run_tools import transient
+            return [ModelRetryMiddleware(max_retries=2, retry_on=transient, on_failure="error"), emit_event_middleware]
         return [emit_event_middleware]
 
 
@@ -215,7 +265,8 @@ class GeneralAgent:
             tools=self.tools + self.mcp_agent_as_tools + self.skill_agent_as_tools,
             #tools=[self.search_tool] if len(self.tools + self.mcp_agent_as_tools) >= MAX_TOOLS_SIZE else self.tools + self.mcp_agent_as_tools,
             middleware=self.middlewares,
-            state_schema=StreamAgentState
+            state_schema=StreamAgentState,
+            checkpointer=self.checkpointer,
         )
 
     def setup_search_tool(self):
@@ -266,6 +317,8 @@ class GeneralAgent:
 
 
     async def setup_tools(self) -> List[BaseTool]:
+        from agentchat.tools import AgentToolsWithName
+        from agentchat.tools.openapi_tool.adapter import OpenAPIToolAdapter
         def create_openapi_tool_executor(tool_adapter, tool_name):
             """闭包创建一个执行OpenAPI Tool的方法"""
             async def _execute_wrapper(**kwargs):
@@ -302,6 +355,10 @@ class GeneralAgent:
             else:
                 agent_tool = AgentToolsWithName.get(db_tool.name)
                 if agent_tool:
+                    if self.run_context:
+                        from agentchat.services.run_tools import READ_ONLY_TOOLS
+                        if agent_tool.name in READ_ONLY_TOOLS:
+                            self.run_context.read_only_tools.add(agent_tool.name)
                     tools.append(
                         agent_tool.model_copy(
                             update={
@@ -396,6 +453,7 @@ class GeneralAgent:
             Returns:
                 str: 返回从知识库检索来的信息
             """
+            from agentchat.services.rag.handler import RagHandler
             knowledge_message = await RagHandler.retrieve_ranked_documents(
                 query, self.agent_config.knowledge_ids
             )
@@ -409,23 +467,26 @@ class GeneralAgent:
             }
 
 
-    async def astream(self, messages: List[BaseMessage]) -> AsyncGenerator[Dict[str, Any], None]:
+    async def astream(self, messages: List[BaseMessage], *, resume=False, resume_value=None) -> AsyncGenerator[Dict[str, Any], None]:
         """流式调用主方法"""
         response_content = ""
         try:
+            graph_config = {"callbacks": [usage_metadata_callback], "recursion_limit": 40}
+            inputs = {"messages": copy.deepcopy(messages), "model_call_count": 0, "user_id": self.agent_config.user_id}
+            if self.run_context:
+                graph_config["configurable"] = {"thread_id": self.run_context.run_id}
+                if resume:
+                    inputs = Command(resume=resume_value) if resume_value is not None else None
             async for token, metadata in self.react_agent.astream(
-                input={
-                    "messages": copy.deepcopy(messages),
-                    "model_call_count": 0,
-                    "user_id": self.agent_config.user_id,
-                },
-                config={
-                    "callbacks": [usage_metadata_callback],
-                },
+                input=inputs,
+                config=graph_config,
+                **({"durability": "sync"} if self.run_context else {}),
                 stream_mode=["messages", "custom"],
             ):
                 if token == "custom":
                     yield self.wrap_event(metadata)
+                elif metadata[1].get("context_internal") or set(metadata[1].get("tags", [])) & {"context-memory", "context-compaction"}:
+                    continue
                 elif isinstance(metadata[0], AIMessageChunk) and metadata[0].content:
                     response_content += metadata[0].content
                     yield {
@@ -439,6 +500,8 @@ class GeneralAgent:
 
         # 针对模型回复进行兜底操作，错误类型包括：敏感词，模型问题
         except Exception as err:
+            if self.run_context:
+                raise
             logger.error(f"LLM Model Error: {err}")
             yield {
                 "type": "error",

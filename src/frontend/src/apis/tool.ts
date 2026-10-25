@@ -2,6 +2,7 @@ import { request } from "../utils/request"
 
 // 工具相关接口类型定义
 export interface ToolResponse {
+  enabled?: boolean
   tool_id: string
   name: string  // 英文名称，大模型调用
   display_name: string  // 中文名称，显示给用户
@@ -10,6 +11,10 @@ export interface ToolResponse {
   logo_url: string
   openapi_schema?: Record<string, any>
   auth_config?: { type: '' | 'bearer' | 'basic'; token?: string }
+}
+
+export function setToolEnabledAPI(toolId: string, enabled: boolean) {
+  return request({ url: '/api/v1/tool/enabled', method: 'PATCH', data: { tool_id: toolId, enabled } })
 }
 
 export interface ApiResponse<T> {

@@ -8,8 +8,25 @@ from agentchat.api.services.tool import ToolService
 from agentchat.schemas.tool import ToolCreateReq, ToolUpdateReq, ToolDeleteReq
 from agentchat.settings import app_settings
 from agentchat.tools.openapi_tool.adapter import OpenAPIToolAdapter
+from pydantic import BaseModel
 
 router = APIRouter(tags=["Tool"], prefix="/tool")
+
+
+class ToolEnabledRequest(BaseModel):
+    tool_id: str
+    enabled: bool
+
+
+@router.patch("/enabled")
+async def set_tool_enabled(req: ToolEnabledRequest, login_user: UserPayload = Depends(get_login_user)):
+    try:
+        await ToolService.verify_user_permission(req.tool_id, login_user.user_id)
+        from agentchat.database.dao.tool import ToolDao
+        await ToolDao.set_enabled(req.tool_id, req.enabled)
+        return resp_200()
+    except ValueError as error:
+        raise HTTPException(status_code=403, detail=str(error)) from error
 
 @router.post("/create", response_model=UnifiedResponseModel)
 async def create_tool(

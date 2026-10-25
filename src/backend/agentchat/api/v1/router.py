@@ -17,6 +17,7 @@ from agentchat.api.v1 import (
     register_mcp,
     register_mcp_completion,
     register_task,
+    runs,
     tool,
     upload,
     usage_stats,
@@ -28,6 +29,7 @@ from agentchat.api.v1 import (
 api_v1_router = APIRouter(prefix="/api/v1")
 
 api_v1_router.include_router(completion.router)
+api_v1_router.include_router(runs.router)
 api_v1_router.include_router(conversation.router)
 api_v1_router.include_router(message.router)
 api_v1_router.include_router(agent.router)

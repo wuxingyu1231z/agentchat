@@ -35,6 +35,8 @@ def bocha_search(
     """
 
     url = app_settings.tools.bocha.get("endpoint")
+    if not url or not app_settings.tools.bocha.get("api_key"):
+        raise ValueError("当前未配置 Bocha 搜索服务")
     headers = {
         'Authorization': f'Bearer {app_settings.tools.bocha.get("api_key")}',  # 请替换为你的API密钥
         'Content-Type': 'application/json'
@@ -55,13 +57,14 @@ def bocha_search(
     if exclude is not None:
         data["exclude"] = exclude
 
-    response = requests.post(url, headers=headers, json=data)
+    response = requests.post(url, headers=headers, json=data, timeout=30)
+    response.raise_for_status()
 
     if response.status_code == 200:
         json_response = response.json()
         try:
             if json_response["code"] != 200 or not json_response["data"]:
-                return f"搜索API请求失败，原因是: {response.msg or '未知错误'}"
+                raise ValueError("搜索服务未返回有效数据")
 
             webpages = json_response["data"]["webPages"]["value"]
             if not webpages:
@@ -78,7 +81,7 @@ def bocha_search(
                     f"发布时间: {page['dateLastCrawled']}\n\n"
                 )
             return formatted_results.strip()
-        except Exception as e:
-            return f"搜索API请求失败，原因是：搜索结果解析失败 {str(e)}"
+        except (KeyError, TypeError) as e:
+            raise ValueError("搜索结果解析失败") from e
     else:
-        return f"搜索API请求失败，状态码: {response.status_code}, 错误信息: {response.text}"
+        raise ValueError(f"搜索服务返回非预期状态：{response.status_code}")

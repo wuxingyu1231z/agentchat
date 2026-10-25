@@ -27,6 +27,8 @@ class UserResourcesDao:
         ):
             templates = session.exec(select(model).where(model.user_id == SystemUser)).all()
             if not templates:
+                if model is AgentTable:
+                    continue  # 通用助手是内置入口，不为每个工具创建 Agent 副本。
                 raise ValueError(f"默认资源模板尚未就绪：{model.__tablename__}")
 
             mapping = {}

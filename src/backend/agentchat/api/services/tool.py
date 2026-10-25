@@ -72,7 +72,9 @@ class ToolService:
     ) -> list[dict]:
         """默认资源已复制到个人名下，只读取当前用户的工具。"""
         tools = await ToolDao.get_all_tools(user_id)
-        return [tool.to_dict() for tool in tools]
+        values = [tool.to_dict() for tool in tools]
+        flags = await ToolDao.enabled_flags([tool["tool_id"] for tool in values])
+        return [{**tool, "enabled": flags.get(tool["tool_id"], True)} for tool in values]
 
     @classmethod
     async def get_tool_name_by_id(

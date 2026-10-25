@@ -35,6 +35,18 @@ async def get_agent(
 ):
     try:
         results = await AgentService.get_all_agent_by_user_id(user_id=login_user.user_id)
+        from agentchat.api.services.conversation import ConversationService
+        from agentchat.utils.default_agent import DEFAULT_AGENT_ID
+        general = await ConversationService.get_agent_config(DEFAULT_AGENT_ID, login_user.user_id)
+        general.update(
+            agent_id=DEFAULT_AGENT_ID, is_custom=False, is_builtin=True,
+            default_model_name=app_settings.multi_models.chat_model.model_name if app_settings.multi_models else "",
+        )
+        results.insert(0, general)
+        from agentchat.utils.research_agent import research_agent_config
+        research = research_agent_config(login_user.user_id)
+        research.update(agent_id=research["id"], default_model_name=general["default_model_name"])
+        results.insert(1, research)
         return resp_200(data=results)
     except Exception as err:
         logger.error(err)

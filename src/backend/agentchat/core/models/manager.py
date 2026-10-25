@@ -25,12 +25,10 @@ class ModelManager:
     def get_chat_model(cls, **kwargs) -> BaseChatModel:
         chat_model = app_settings.multi_models.chat_model
 
-        return ChatOpenAI(
-            stream_usage=True,
-            model=chat_model.model_name,
-            api_key=chat_model.api_key,
-            base_url=chat_model.base_url
-        )
+        options = dict(stream_usage=True, model=chat_model.model_name,
+            api_key=chat_model.api_key, base_url=chat_model.base_url)
+        options.update(kwargs)
+        return ChatOpenAI(**options)
 
     @classmethod
     def get_reasoning_model(cls) -> ReasoningModel:

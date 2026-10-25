@@ -51,6 +51,7 @@ export function normalizeHistory(messages: any[]): ChatMessage[] {
                 rows.push(row);
             }
             row.aiMessage.content = String(message.content || '');
+            row.aiMessage.historyId = message.id;
             const events: NonNullable<ChatMessage['eventInfo']> = [];
             for (const event of Array.isArray(message.events) ? message.events : []) {
                 if (event.type === 'agent') {

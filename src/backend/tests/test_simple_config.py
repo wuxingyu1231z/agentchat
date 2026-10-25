@@ -277,6 +277,11 @@ with TestClient(app) as client:
     login = client.post("/api/v1/user/login", json={"user_name": "simple_test", "user_password": "local-test"})
     assert login.status_code == 200, login.text
     token = login.json()["data"]["access_token"]
+    from agentchat.settings import app_settings
+    general = client.get("/api/v1/agent", headers={"Authorization": "Bearer " + token}).json()["data"][0]
+    assert general["id"] == "general" and general["is_builtin"]
+    assert general["llm_id"] == "" and general["default_model_name"] == app_settings.multi_models.chat_model.model_name
+    assert "api_key" not in general
     uploaded = client.post("/api/v1/upload", files={"file": ("test.txt", b"local upload", "text/plain")}, headers={"Authorization": "Bearer " + token})
     assert uploaded.status_code == 200, uploaded.text
     url = uploaded.json()["data"]
@@ -287,8 +292,11 @@ with TestClient(app) as client:
     from agentchat.database import engine, AgentTable
     from sqlmodel import Session, select
     with Session(engine) as session:
-        agent = session.exec(select(AgentTable).where(AgentTable.user_id == login.json()["data"]["user_id"])).first()
-        assert agent is not None
+        assert session.exec(select(AgentTable).where(AgentTable.user_id == login.json()["data"]["user_id"])).first() is None
+        agent = AgentTable(name="专用测试助手", user_id=login.json()["data"]["user_id"], logo_url="", enable_memory=False)
+        session.add(agent)
+        session.commit()
+        session.refresh(agent)
         agent_id = agent.id
     from ag_ui.core import Event
     from pydantic import TypeAdapter
@@ -377,6 +385,10 @@ with TestClient(app) as client:
     client.post("/api/v1/user/register", json={"user_name": "other_user", "user_email": "other@example.test", "user_password": "local-test"})
     other_token = client.post("/api/v1/user/login", json={"user_name": "other_user", "user_password": "local-test"}).json()["data"]["access_token"]
     other_headers = {**protocol_headers, "Authorization": "Bearer " + other_token}
+    other_user_id = client.get("/api/v1/agent", headers=other_headers).json()["data"][0]["user_id"]
+    with Session(engine) as session:
+        session.add(AgentTable(name="专用测试助手", user_id=other_user_id, logo_url="", enable_memory=False))
+        session.commit()
     # 即使旧配置放行 MCP 路径，聊天也必须校验真实身份并隔离读写。
     task_root = "/api/v1/mcp/register/task"
     client.cookies.clear()
@@ -410,10 +422,11 @@ with TestClient(app) as client:
     assert forbidden_config.json()["status_code"] == 500 and "private-token" not in forbidden_config.text
     assert client.request("DELETE", "/api/v1/mcp_user_config/delete", json={"config_id": config_id}, headers=protocol_headers).json()["status_code"] == 500
     private = []
-    other_user_id = client.get("/api/v1/agent", headers=other_headers).json()["data"][0]["user_id"]
+    def resource_rows(url, method, headers):
+        return [row for row in client.request(method, url, headers=headers).json()["data"] if not row.get("is_builtin")]
     for url, method, key in categories:
-        first = client.request(method, url, headers=protocol_headers).json()["data"]
-        second = client.request(method, url, headers=other_headers).json()["data"]
+        first = resource_rows(url, method, protocol_headers)
+        second = resource_rows(url, method, other_headers)
         if url == "/api/v1/mcp_server":
             import json
             from pathlib import Path
@@ -442,7 +455,7 @@ with TestClient(app) as client:
     edited = client.post("/api/v1/agent_skill/update", json={"agent_skill_id": own_skill["id"], "name": "my skill", "description": own_skill["description"]}, headers=protocol_headers)
     assert edited.json()["status_code"] == 200, edited.text
     for url, method, key, first, second in private:
-        current = client.request(method, url, headers=other_headers).json()["data"]
+        current = resource_rows(url, method, other_headers)
         assert current == second
     deletions = [
         ("DELETE", "/api/v1/agent", {"agent_id": private[0][3][0]["id"]}),
@@ -454,8 +467,8 @@ with TestClient(app) as client:
         result = client.request(method, url, json=body, headers=protocol_headers)
         assert result.json()["status_code"] == 200, result.text
     for url, method, key, first, second in private:
-        assert len(client.request(method, url, headers=protocol_headers).json()["data"]) == len(first) - 1
-        assert client.request(method, url, headers=other_headers).json()["data"] == second
+        assert len(resource_rows(url, method, protocol_headers)) == len(first) - 1
+        assert resource_rows(url, method, other_headers) == second
     print("SIMPLE_APP_OK")
 '''
     env = {

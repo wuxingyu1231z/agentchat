@@ -4,10 +4,29 @@ from typing import List
 from sqlmodel import Session, and_, delete, desc, or_, select, update
 
 from agentchat.database.models.tool import ToolTable
+from agentchat.database.models.agent_run import ToolPreference
 from agentchat.database.session import async_session_getter, session_getter
 
 
 class ToolDao:
+
+    @staticmethod
+    async def enabled_flags(tool_ids):
+        if not tool_ids:
+            return {}
+        async with async_session_getter() as session:
+            rows = (await session.exec(select(ToolPreference).where(ToolPreference.tool_id.in_(tool_ids)))).all()
+            return {row.tool_id: row.enabled for row in rows}
+
+    @staticmethod
+    async def set_enabled(tool_id, enabled):
+        async with async_session_getter() as session:
+            row = await session.get(ToolPreference, tool_id)
+            if row is None:
+                row = ToolPreference(tool_id=tool_id)
+            row.enabled = enabled
+            session.add(row)
+            await session.commit()
 
     @classmethod
     async def _get_tool(cls, zh_name: str, en_name: str,

@@ -21,6 +21,8 @@ def get_weather(city: str):
 
 def _get_weather(location: str):
     """帮助用户想要查询的天气"""
+    if not app_settings.tools.weather.get('api_key'):
+        raise ValueError('天气工具尚未配置服务密钥，请配置 weather.api_key')
     params = {
         'key': app_settings.tools.weather.get('api_key'),
         'city': location,
@@ -29,7 +31,10 @@ def _get_weather(location: str):
 
     try:
         res = requests.get(url=app_settings.tools.weather.get('endpoint'), params=params, timeout=5)  # 预报天气
+        res.raise_for_status()
         result = res.json()
+        if not result.get('forecasts'):
+            raise ValueError(f"天气查询失败：{result.get('info', '城市未匹配或服务配置无效')}")
         city = result.get('forecasts')[0].get("city")  # 获取城市
         message_result = []
         data = result.get('forecasts')[0].get("casts")
@@ -47,7 +52,7 @@ def _get_weather(location: str):
         final_result = WEATHER_PROMPT.format(city, message_result[0], message_result[1:])
         return final_result
     except Exception as err:
-        logger.error(f'Call Weather Tool Err: {err}')
-        return str(err)
+        logger.warning('天气工具调用失败：{}', type(err).__name__)
+        raise
 
 

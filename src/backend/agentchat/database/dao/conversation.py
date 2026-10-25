@@ -65,6 +65,8 @@ class ConversationDao:
     async def delete_conversation_by_id(cls, conversation_id: str):
         """Delete conversation by conversation_id"""
         async with async_session_getter() as session:
+            from agentchat.database.dao.context import ContextDao
+            await ContextDao.clear(session, conversation_id)
             statement = delete(ConversationTable).where(ConversationTable.conversation_id == conversation_id)
             await session.exec(statement)
             await session.commit()

@@ -2,6 +2,11 @@ from loguru import logger
 from sqlmodel import SQLModel
 
 from agentchat.database.models.agent import AgentTable
+from agentchat.database.models.agent_run import AgentRun, RunEvent, RunToolCall, RetiredAgent, ToolPreference
+from agentchat.database.models.research import ResearchWorkspace
+from agentchat.database.models.context import ContextArtifact, ContextChunk, ContextMemory
+from agentchat.database.models.experience import ExperienceEntry, ExperienceObservation, ExperienceEvaluation, RunExperienceSnapshot
+from agentchat.database.models.sandbox import SandboxJob, SandboxDocument, SandboxUpload
 from agentchat.database.models.agent_skill import AgentSkill
 from agentchat.database.models.conversation import ConversationTable
 from agentchat.database.models.history import HistoryTable

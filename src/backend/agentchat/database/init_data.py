@@ -10,6 +10,9 @@ from sqlalchemy.exc import IntegrityError
 from sqlmodel import SQLModel
 
 from agentchat.database import SystemUser, engine, ensure_database
+from agentchat.database.models.agent_run import RetiredAgent
+from agentchat.database.dao.conversation import ConversationDao
+from agentchat.utils.default_agent import DEFAULT_AGENT_ID
 from agentchat.database.dao.agent import AgentDao
 from agentchat.database.dao.agent_skill import AgentSkillDao
 from agentchat.database.dao.llm import LLMDao
@@ -99,25 +102,32 @@ async def _init_default_tools():
 
 
 async def _init_default_agents(model_id: str):
-    """按系统工具补齐默认智能体，不把个人工具作为初始化模板。"""
-    tools = await ToolDao.get_tool_by_user_id(SystemUser)
-    existing = await AgentDao.get_agent_by_user_id(SystemUser)
-    bindings = {tuple(agent.tool_ids) for agent in existing}
-    for tool in tools:
-        if (tool.tool_id,) in bindings:
+    """归档旧版逐工具生成的助手；自建和已定制的专用智能体继续保留。"""
+    from sqlmodel import Session, select
+    from agentchat.database.models.conversation import ConversationTable
+    # 根据原生成规则精确识别，不按名称关键词删除用户自建智能体。
+    existing = await AgentDao.get_agent()
+    for agent in existing:
+        if agent.is_custom or len(agent.tool_ids or []) != 1:
             continue
-        await AgentDao.create_agent(
-            AgentTable(
-                name=f"{tool.display_name}助手",
-                description=tool.description,
-                logo_url=tool.logo_url,
-                tool_ids=[tool.tool_id],
-                user_id=SystemUser,
-                is_custom=False,
-                llm_id=model_id,
-            )
-        )
-        bindings.add((tool.tool_id,))
+        tool = await ToolDao.get_tool_by_id(agent.tool_ids[0])
+        if tool is None or agent.name != f"{tool.display_name}助手" or agent.system_prompt:
+            continue
+        if agent.mcp_ids or agent.agent_skill_ids or agent.knowledge_ids:
+            continue
+        if agent.llm_id not in {"", model_id} or (agent.description and agent.description != tool.description):
+            continue
+        if not agent.enable_memory or (agent.logo_url and agent.logo_url != tool.logo_url):
+            continue
+        with Session(engine) as session:
+            if session.get(RetiredAgent, agent.id) is None:
+                session.add(RetiredAgent(id=agent.id, user_id=agent.user_id, config=agent.to_dict()))
+            conversations = [row.conversation_id for row in session.exec(select(ConversationTable).where(ConversationTable.agent_id == agent.id)).all()]
+            session.commit()
+        await ConversationDao.detach_agent(agent.id)
+        for conversation_id in conversations:
+            await ConversationDao.switch_agent(conversation_id, DEFAULT_AGENT_ID)
+        await AgentDao.delete_agent_by_id(agent.id)
 
 
 async def _init_system_mcp_server():

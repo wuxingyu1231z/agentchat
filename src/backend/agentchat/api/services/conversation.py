@@ -11,6 +11,8 @@ from agentchat.database.dao.history import HistoryDao
 from agentchat.database.models.user import AdminUser
 from agentchat.prompts.completion import GENERATE_CHAT_SUMMARY
 from agentchat.utils.conversation_title import normalize_conversation_title
+from agentchat.utils.default_agent import DEFAULT_AGENT_ID, default_agent_config
+from agentchat.utils.research_agent import BUILTIN_AGENT_IDS, RESEARCH_AGENT_ID, research_agent_config
 
 
 class ConversationService:
@@ -70,7 +72,9 @@ class ConversationService:
     async def create_conversation(cls, name: str, agent_id: str, agent_type: str, user_id: str):
         """创建会话，智能体只是当前选择，并非永久绑定。"""
         try:
-            await AgentService._check_permission(agent_id, user_id)
+            agent_id = agent_id or DEFAULT_AGENT_ID
+            if agent_id not in BUILTIN_AGENT_IDS:
+                await AgentService._check_permission(agent_id, user_id)
             conversation = await ConversationDao.create_conversation(
                 name=name,
                 agent_id=agent_id,
@@ -104,9 +108,22 @@ class ConversationService:
         """Get agent information by conversation_id"""
         try:
             conversation = await ConversationDao.get_agent_by_conversation_id(conversation_id=conversation_id)
-            return await AgentService.select_agent_by_id(conversation.agent_id)
+            return await cls.get_agent_config(conversation.agent_id, conversation.user_id)
         except Exception as err:
             raise ValueError(f"Select Conversation Appear Error: {err}")
+
+    @classmethod
+    async def get_agent_config(cls, agent_id: str, user_id: str):
+        """通用助手不占用数据库记录，也不绑定其他用户的模型或工具。"""
+        if agent_id == RESEARCH_AGENT_ID:
+            return research_agent_config(user_id)
+        if not agent_id or agent_id == DEFAULT_AGENT_ID:
+            from agentchat.api.services.tool import ToolService
+            config = default_agent_config(user_id)
+            tools = await ToolService.get_all_tools(user_id)
+            config["tool_ids"] = [tool["tool_id"] for tool in tools if tool.get("enabled", True)]
+            return config
+        return await AgentService.select_agent_by_id(agent_id)
 
     @classmethod
     async def update_conversation_time(cls, conversation_id: str):
@@ -135,19 +152,18 @@ class ConversationService:
             raise ValueError(f"没有权限访问")
 
     @classmethod
-    async def resolve_agent(cls, conversation_id: str, user_id: str, agent_id: str | None = None):
+    async def resolve_agent(cls, conversation_id: str, user_id: str, agent_id: str | None = None, *, save_selection=True):
         """解析本次请求的智能体，并保存当前选择；兼容未传智能体 ID 的旧客户端。"""
         await cls.verify_user_permission(conversation_id, user_id)
         conversation = await ConversationDao.select_conversation_by_id(conversation_id)
-        selected_id = agent_id or conversation.agent_id
-        if not selected_id:
-            raise ValueError("请选择智能体")
-        await AgentService._check_permission(selected_id, user_id)
-        config = await AgentService.select_agent_by_id(selected_id)
+        selected_id = agent_id or conversation.agent_id or DEFAULT_AGENT_ID
+        if selected_id not in BUILTIN_AGENT_IDS:
+            await AgentService._check_permission(selected_id, user_id)
+        config = await cls.get_agent_config(selected_id, user_id)
         if config is None:
             raise ValueError("智能体不存在，请重新选择")
         await AgentService.validate_bindings(config, user_id)
-        if selected_id != conversation.agent_id:
+        if save_selection and selected_id != conversation.agent_id:
             await ConversationDao.switch_agent(conversation_id, selected_id)
         return config
 

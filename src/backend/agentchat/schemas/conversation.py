@@ -2,10 +2,12 @@ from typing import Optional
 
 from pydantic import BaseModel, Field
 
+from agentchat.utils.default_agent import DEFAULT_AGENT_ID
+
 
 class ConversationCreateRequest(BaseModel):
     name: str = Field("新会话", description='会话初始标题，首条消息后异步生成话题标题')
-    agent_id: str = Field(description='对话Agent的ID')
+    agent_id: str = Field(DEFAULT_AGENT_ID, description='对话智能体 ID；省略时使用通用助手')
     agent_type: str = Field("Agent", description="Agent的类型，仅支持MCPAgent or Agent")
 
 

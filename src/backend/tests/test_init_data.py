@@ -41,6 +41,7 @@ def startup_database(tmp_path, monkeypatch):
 
     monkeypatch.setattr(init_data, "engine", engine)
     monkeypatch.setattr(init_data, "ensure_database", lambda: None)
+    monkeypatch.setattr("agentchat.database.dao.conversation.async_session_getter", async_sessions)
     monkeypatch.setattr(
         init_data.app_settings,
         "multi_models",
@@ -75,15 +76,15 @@ def template_ids(engine):
         ]
 
 
-def test_startup_is_local_repeatable_and_repairs_missing_agent(startup_database):
+def test_startup_is_local_repeatable_without_per_tool_agents(startup_database):
     engine, outbound = startup_database
 
     async def check():
         await init_data.init_agentchat_system()
         initial = template_ids(engine)
-        assert all(initial)
+        assert all(initial[:4])
+        assert initial[4] == []
         assert len(initial[3]) == 3
-        assert len(initial[1]) == len(initial[4])
         configs = await init_data.load_json("mcp_server.json")
         with Session(engine) as session:
             servers = session.exec(select(MCPServerTable)).all()
@@ -97,19 +98,39 @@ def test_startup_is_local_repeatable_and_repairs_missing_agent(startup_database)
                 assert server.tools
         await init_data.init_agentchat_system()
         assert template_ids(engine) == initial
-        with Session(engine) as session:
-            agent = session.get(AgentTable, initial[4][0])
-            tool_id = agent.tool_ids[0]
-            session.delete(agent)
-            session.commit()
-        await init_data.init_agentchat_system()
-        with Session(engine) as session:
-            agents = session.exec(select(AgentTable)).all()
-            assert len(agents) == len(initial[4])
-            assert sum(agent.tool_ids == [tool_id] for agent in agents) == 1
         assert template_ids(engine)[:4] == initial[:4]
         outbound.assert_not_called()
 
+    asyncio.run(check())
+
+
+def test_legacy_tool_agents_are_archived_but_specialists_and_history_survive(startup_database):
+    from agentchat.database.models.agent_run import RetiredAgent
+    from agentchat.database.models.conversation import ConversationTable
+    from agentchat.database.models.history import HistoryTable
+    engine, _ = startup_database
+
+    async def check():
+        await init_data.init_agentchat_system()
+        with Session(engine) as session:
+            tool = session.exec(select(ToolTable)).first()
+            session.add(AgentTable(id="legacy", logo_url="", name=f"{tool.display_name}助手", tool_ids=[tool.tool_id], user_id="0", is_custom=False))
+            session.add(AgentTable(id="papers", logo_url="", name="论文检索", user_id="0", is_custom=True, system_prompt="专用检索策略"))
+            session.add(AgentTable(id="customized-model", logo_url="", name=f"{tool.display_name}助手", tool_ids=[tool.tool_id], user_id="0", is_custom=False, llm_id="custom-model"))
+            session.add(ConversationTable(conversation_id="old-chat", name="旧会话", agent_id="legacy", user_id="user"))
+            session.add(HistoryTable(role="assistant", conversation_id="old-chat", content="已有天气回复", events=[]))
+            session.commit()
+        await init_data.init_agentchat_system()
+        await init_data.init_agentchat_system()
+        with Session(engine) as session:
+            assert session.get(AgentTable, "legacy") is None
+            assert session.get(AgentTable, "papers") is not None
+            assert session.get(AgentTable, "customized-model") is not None
+            assert session.get(RetiredAgent, "legacy") is not None
+            assert session.get(ConversationTable, "old-chat").agent_id == "general"
+            reply = session.exec(select(HistoryTable)).first()
+            assert reply.content == "已有天气回复"
+            assert reply.events[0]["data"]["agent_id"] == "legacy"
     asyncio.run(check())
 
 

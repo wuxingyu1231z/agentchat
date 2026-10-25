@@ -24,6 +24,8 @@ async def upload_file(
 
         storage_client.sign_url_for_get(sign_url)
         storage_client.upload_file(oss_object_name, file_content)
+        from agentchat.database.dao.sandbox import SandboxDao
+        await SandboxDao.register_upload(oss_object_name, login_user.user_id, file_content)
 
         return resp_200(sign_url)
     except Exception as err:

@@ -2,7 +2,6 @@ from fastapi import APIRouter, Body, Depends
 from loguru import logger
 
 from agentchat.api.responses.builder import UnifiedResponseModel, resp_200, resp_500
-from agentchat.api.services.agent import AgentService
 from agentchat.api.services.conversation import ConversationService
 from agentchat.api.services.usage_stats import UsageStatsService
 from agentchat.api.services.user import UserPayload, get_login_user
@@ -24,8 +23,8 @@ async def get_conversation(
         results = []
 
         for message in messages:
-            message_agent = await AgentService.select_agent_by_id(
-                agent_id=message["agent_id"]
+            message_agent = await ConversationService.get_agent_config(
+                agent_id=message["agent_id"], user_id=login_user.user_id
             )
             message_agent = message_agent or {}
             # 会话标题、归属和时间属于会话，不能被智能体信息覆盖。
@@ -82,6 +81,9 @@ async def switch_conversation_agent(
     login_user: UserPayload = Depends(get_login_user)
 ):
     try:
+        from agentchat.services.agent_runs import RunService
+        await ConversationService.verify_user_permission(req.conversation_id, login_user.user_id)
+        await RunService.assert_idle(req.conversation_id)
         conversation = await ConversationService.switch_agent(req.conversation_id, req.agent_id, login_user.user_id)
         return resp_200(conversation)
     except Exception as error:
@@ -96,6 +98,8 @@ async def delete_conversation(
     try:
         # 验证用户权限
         await ConversationService.verify_user_permission(conversation_id, login_user.user_id)
+        from agentchat.services.agent_runs import RunService
+        await RunService.assert_idle(conversation_id)
 
         await ConversationService.delete_conversation(conversation_id=conversation_id)
         return resp_200()

@@ -38,7 +38,7 @@ def _send_email(sender: str, receiver: str, email_message: str, password: str):
         body = email_message
         message.attach(MIMEText(body, "plain"))
 
-        server = smtplib.SMTP_SSL("smtp.qq.com", 465)  # 发件人邮箱中的SMTP服务器，端口是465
+        server = smtplib.SMTP_SSL("smtp.qq.com", 465, timeout=30)  # 发件人邮箱中的SMTP服务器，端口是465
         server.login(sender, password)  # 括号中对应的是发件人邮箱账号、邮箱密码
         server.sendmail(sender, receiver, message.as_string())  # 括号中对应的是发件人邮箱账号、收件人邮箱账号、发送邮件
         server.quit()  # 关闭连接
@@ -47,5 +47,5 @@ def _send_email(sender: str, receiver: str, email_message: str, password: str):
         return "send email successful, please check receiver`s email"
 
     except Exception as err:
-        logger.error(f"send email appear error : {err}")
-        return "send email is error"
+        logger.warning("邮件发送失败：{}", type(err).__name__)
+        raise

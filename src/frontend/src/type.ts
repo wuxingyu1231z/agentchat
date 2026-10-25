@@ -1,6 +1,6 @@
 export  interface ConversationCreateType {
     name: string,
-    agent_id: string,
+    agent_id?: string,
     agent_type: string,
 }
 // searchType
@@ -59,6 +59,7 @@ export interface ChatAttachment {
 }
 
 export interface MessageType {
+  historyId?: string
   agent?: { id: string; name: string; logo_url: string }
   attachments?: ChatAttachment[]
   content: string
@@ -111,6 +112,8 @@ export interface KnowledgeFileType {
 
 // 新增智能体相关类型定义
 export interface Agent {
+  is_builtin?: boolean
+  default_model_name?: string
   agent_id: string
   name: string
   description: string

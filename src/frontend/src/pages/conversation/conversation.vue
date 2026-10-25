@@ -13,6 +13,7 @@ import { historyGroup, historyTime } from '../../utils/chat-ui';
 import { useScrollingScrollbar } from '../../utils/scrolling-scrollbar';
 
 import { responseError } from '../../utils/resource-visuals';
+import { DEFAULT_AGENT_ID, DEFAULT_CONVERSATION_AGENT } from '../../utils/conversation-agent';
 interface Conversation {
     id: string;
     name: string;
@@ -23,8 +24,8 @@ interface Conversation {
 }
 const route = useRoute(), router = useRouter(), store = useHistoryChatStore();
 const { scrolling, showScrollbar } = useScrollingScrollbar();
-const conversations = ref<Conversation[]>([]), agents = ref<AgentResponse[]>([]), loading = ref(false), agentsLoading = ref(false), loadError = ref(''), agentError = ref('');
-const search = ref(''), agentSearch = ref(''), selectedAgent = ref(''), picker = ref(false), creating = ref(false), createError = ref(''), deleting = ref(''), pendingMessage = ref(''), sidebarOpen = ref(false), brokenLogos = ref(new Set<string>());
+const conversations = ref<Conversation[]>([]), agents = ref<AgentResponse[]>([DEFAULT_CONVERSATION_AGENT]), loading = ref(false), agentsLoading = ref(false), loadError = ref(''), agentError = ref('');
+const search = ref(''), agentSearch = ref(''), selectedAgent = ref(DEFAULT_AGENT_ID), picker = ref(false), creating = ref(false), createError = ref(''), deleting = ref(''), pendingMessage = ref(''), sidebarOpen = ref(false), brokenLogos = ref(new Set<string>());
 const attachment = ref<{
     url: string;
     name: string;
@@ -33,7 +34,7 @@ const attachment = ref<{
 }>();
 const agentId = (agent: AgentResponse) => String((agent as any).id || agent.agent_id);
 const currentConversation = computed(() => conversations.value.find(conversation => conversation.id === route.query.conversation_id));
-const activeAgent = computed(() => agents.value.find(agent => agentId(agent) === currentConversation.value?.agentId));
+const activeAgent = computed(() => currentConversation.value ? agents.value.find(agent => agentId(agent) === (currentConversation.value?.agentId || DEFAULT_AGENT_ID)) : undefined);
 const pickedAgent = computed(() => agents.value.find(agent => agentId(agent) === selectedAgent.value));
 const visibleAgents = computed(() => agents.value.filter(agent => [agent.name, agent.description].join(' ').toLowerCase().includes(agentSearch.value.trim().toLowerCase())));
 const groups = computed(() => { const visible = conversations.value.filter(conversation => conversation.name.toLowerCase().includes(search.value.trim().toLowerCase())).sort((a, b) => (Date.parse(b.time) || 0) - (Date.parse(a.time) || 0)); return ['今天', '昨天', '过去 7 天', '更早'].map(label => ({ label, items: visible.filter(conversation => historyGroup(conversation.time) === label) })).filter(group => group.items.length); });
@@ -63,7 +64,7 @@ async function fetchAgents() { const id = ++agentRequest; agentsLoading.value = 
         return;
     if (response.data.status_code !== 200)
         throw new Error(response.data.status_message || '智能体加载失败');
-    agents.value = (response.data.data || []).map(agent => ({ ...agent, logo_url: agentIdentity(agent).url }));
+    agents.value = [DEFAULT_CONVERSATION_AGENT, ...(response.data.data || []).filter(agent => agentId(agent) !== DEFAULT_AGENT_ID).map(agent => ({ ...agent, logo_url: agentIdentity(agent).url }))];
 }
 catch (error) {
     if (!disposed && id === agentRequest)
@@ -119,7 +120,7 @@ finally {
     deleting.value = '';
 } }
 function selectConversation(conversation: Conversation) { attachment.value = undefined; sidebarOpen.value = false; router.push({ path: '/conversation/chatPage', query: { conversation_id: conversation.id } }); }
-function newConversation() { attachment.value = undefined; selectedAgent.value = ''; pendingMessage.value = ''; sidebarOpen.value = false; router.push('/conversation'); }
+function newConversation() { attachment.value = undefined; selectedAgent.value = DEFAULT_AGENT_ID; createError.value = ''; pendingMessage.value = ''; sidebarOpen.value = false; router.push('/conversation'); }
 function failLogo(id: string) { brokenLogos.value = new Set([...brokenLogos.value, id]); }
 provide('requestConversation', requestConversation);
 provide('conversationAgents', agents);

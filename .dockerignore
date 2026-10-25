@@ -8,3 +8,13 @@ src/frontend/pnpm-lock.yaml
 src/frontend/yarn.lock
 src/frontend/dist/
 src/frontend/.env*
+.runtime/
+**/config.local*.yaml
+**/*.db
+**/*.db-shm
+**/*.db-wal
+**/*.sqlite
+**/*.sqlite-shm
+**/*.sqlite-wal
+.local-study/
+src/backend/data/sandbox/
