@@ -263,33 +263,3 @@ node --test tests/mars-task.test.cjs
 本项目采用 [MIT License](LICENSE)。
 
 <div align="center">
-
-## 🌟 **感谢支持 AgentChat！**
-
-### 如果这个项目对你有帮助，请给我们一个 ⭐️
-
-*让更多的人发现这个项目，一起构建AI的未来！*
-
-*Made with ❤ by the AgentChat Author MingGuang Tian*
-
-
-<picture>
-  <source
-    media="(prefers-color-scheme: dark)"
-    srcset="
-      https://star-history.dera.page/svg?repos=Shy2593666979/AgentChat&type=Date&theme=dark
-    "
-  />
-  <source
-    media="(prefers-color-scheme: light)"
-    srcset="
-      https://star-history.dera.page/svg?repos=Shy2593666979/AgentChat&type=Date
-    "
-  />
-  <img
-    alt="Star History Chart"
-    src="https://star-history.dera.page/svg?repos=Shy2593666979/AgentChat&type=Date"
-  />
-</picture>
-
-</div>

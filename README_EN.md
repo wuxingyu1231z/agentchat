@@ -261,32 +261,3 @@ The detailed guides below are currently in Chinese:
 This project is licensed under the [MIT License](LICENSE).
 
 <div align="center">
-
-## Thank You for Supporting AgentChat!
-
-### If this project has been helpful to you, please give us a Star
-
-*Help more people discover this project and build the future of AI together!*
-
-*Made with love by the AgentChat Author MingGuang Tian*
-
-<picture>
-  <source
-    media="(prefers-color-scheme: dark)"
-    srcset="
-      https://star-history.dera.page/svg?repos=Shy2593666979/AgentChat&type=Date&theme=dark
-    "
-  />
-  <source
-    media="(prefers-color-scheme: light)"
-    srcset="
-      https://star-history.dera.page/svg?repos=Shy2593666979/AgentChat&type=Date
-    "
-  />
-  <img
-    alt="Star History Chart"
-    src="https://star-history.dera.page/svg?repos=Shy2593666979/AgentChat&type=Date"
-  />
-</picture>
-
-</div>
